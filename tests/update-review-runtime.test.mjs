@@ -99,31 +99,59 @@ function entry(id, status = 'ready', extra = {}) {
   }
 }
 
-test('update agent chooser inherits omitted effort levels, respects empty levels, and uses custom levels', async () => {
+test('update agent chooser uses provider defaults unless model effort levels override them', async () => {
   const { dom, restore } = useDom()
   const { UpdateAgentChooser } = await modalModule()
   const root = createRoot(dom.window.document.getElementById('root'))
   const started = []
   try {
-    for (const [levels, savedEffort, expectedEffort, scale] of [
-      [undefined, 'high', 'high', 'high'],
-      [[], 'high', undefined, null],
-      [['low', 'max', 'ultra'], 'max', 'max', 'ultra'],
+    for (const [provider, levels, savedEffort, expectedEffort, scale] of [
+      ['codex', undefined, 'xhigh', 'xhigh', 'xhigh'],
+      ['codex', null, 'none', 'none', 'xhigh'],
+      ['claude', undefined, 'max', 'max', 'ultracode'],
+      ['claude', null, 'ultracode', 'ultracode', 'ultracode'],
+      ['mobius', undefined, 'max', 'max', 'max'],
+      ['other', undefined, 'high', 'high', 'high'],
+      ['claude', [], 'max', undefined, null],
+      ['claude', ['low', 'max', 'ultra'], 'max', 'max', 'ultra'],
     ]) {
       globalThis.fetch = async url => json(url === '/api/models'
-        ? { providers: { codex: [{ id: 'test', label: 'Test', ...(levels === undefined ? {} : { effort_levels: levels }) }] } }
+        ? { providers: { [provider]: [{ id: 'test', label: 'Test', ...(levels === undefined ? {} : { effort_levels: levels }) }] } }
         : url === '/api/owner/model-prefs'
-          ? { selected_agent: { provider: 'codex', model: 'test', effort: savedEffort } }
-          : { codex: { configured: true } })
+          ? { selected_agent: { provider, model: 'test', effort: savedEffort } }
+          : { [provider]: { configured: true } })
       await act(async () => { root.render(React.createElement(UpdateAgentChooser, { token: 'tok', onStart: agent => started.push(agent), onCancel() {} })); await wait(5) })
       const doc = dom.window.document
       assert.equal(doc.querySelector('.st-agent-choice-badge')?.textContent, expectedEffort)
       await act(async () => doc.querySelector('.st-agent-choice-current').click())
       assert.equal(doc.querySelector('.st-agent-choice-effort-scale span:last-child')?.textContent ?? null, scale)
       await act(async () => doc.querySelector('.st-agent-choice-actions button.st-btn-primary').click())
-      assert.deepEqual(started.at(-1), { provider: 'codex', model: 'test', ...(expectedEffort ? { effort: expectedEffort } : {}) })
+      assert.deepEqual(started.at(-1), { provider, model: 'test', ...(expectedEffort ? { effort: expectedEffort } : {}) })
       await act(async () => root.render(null))
     }
+  } finally {
+    await act(async () => root.unmount())
+    restore()
+    await rm(buildDir, { recursive: true, force: true })
+  }
+})
+
+test('update agent chooser does not dispatch a saved effort outside the selected provider scale', async () => {
+  const { dom, restore } = useDom()
+  const { UpdateAgentChooser } = await modalModule()
+  const root = createRoot(dom.window.document.getElementById('root'))
+  const started = []
+  try {
+    globalThis.fetch = async url => json(url === '/api/models'
+      ? { providers: { claude: [{ id: 'test', label: 'Test' }] } }
+      : url === '/api/owner/model-prefs'
+        ? { selected_agent: { provider: 'claude', model: 'test', effort: 'ultra' } }
+        : { claude: { configured: true } })
+    await act(async () => { root.render(React.createElement(UpdateAgentChooser, { token: 'tok', onStart: agent => started.push(agent), onCancel() {} })); await wait(5) })
+    const doc = dom.window.document
+    assert.match(doc.querySelector('[role="alert"]')?.textContent || '', /saved effort is unavailable/i)
+    assert.equal(doc.querySelector('.st-agent-choice-actions button.st-btn-primary').disabled, true)
+    assert.deepEqual(started, [])
   } finally {
     await act(async () => root.unmount())
     restore()

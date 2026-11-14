@@ -9,9 +9,14 @@ import { CapabilityContract } from './CapabilityContract.jsx'
 
 const appName = entry => entry.item?.manifest?.name || entry.item?.name || String(entry.item?.id ?? '')
 const providerNames = { codex: 'OpenAI Codex', claude: 'Claude Code', mobius: 'Möbius' }
-// The platform model registry uses this scale when effort_levels is omitted.
-// An explicit empty scale means the model accepts no effort setting.
-const defaultEfforts = ['low', 'medium', 'high']
+// Match the platform picker's provider scales when a registry model has no
+// override. An explicit effort_levels array (including []) wins instead.
+const defaultEfforts = {
+  codex: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  claude: ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'],
+  mobius: ['minimal', 'low', 'medium', 'high', 'max'],
+}
+const appProviderEfforts = ['low', 'medium', 'high']
 
 // Reused at each update-agent boundary. Cancel never creates a chat; a bound
 // resolver may still reuse its original agent regardless of this selection.
@@ -48,7 +53,7 @@ export function UpdateAgentChooser({ token, title, onStart, onCancel }) {
   }, [token])
   const { rows } = visibleUpdateAgentChoices(choices)
   const model = rows.find(row => `${row.provider}:${row.id}` === selected)
-  const efforts = model ? (Array.isArray(model.effort_levels) ? model.effort_levels : defaultEfforts) : []
+  const efforts = model ? (Array.isArray(model.effort_levels) ? model.effort_levels : defaultEfforts[model.provider] || appProviderEfforts) : []
   const effortIndex = efforts.indexOf(effort)
   const invalidEffort = !!model && !!effort && efforts.length > 0 && effortIndex < 0
   const close = () => { if (!busy) onCancel() }
